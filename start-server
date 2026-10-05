@@ -1,0 +1,9 @@
+#!/bin/zsh
+
+# Automatically navigate to the directory where this script resides
+cd "${0:A:h}" || exit 1
+
+echo "Starting MT5-powered Market Server...)"
+
+# Run the Waitress server via Wine
+WINEPREFIX=~/.mt5 wine python run_waitress_with_logger.py

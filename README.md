@@ -244,9 +244,9 @@ Before proceeding to Wine, it is best to verify that your virtual desktop works.
    vncserver -kill :1
    ```
 
-## Part 3: The Wine & MT5 Quirks (Crucial Fixes)
+## Part 3: The Wine & MT5 Setup
 
-MetaTrader 5 is notoriously hostile to virtualization and uses aggressive anti-debugging software. If you install the absolute latest version of Wine (e.g., Wine 11.0+), MT5 will detect the translation layer as a "debugger" and immediately crash with the error: *"A debugger has been found running in your system."*
+MetaTrader 5 is notoriously hostile to virtualization and uses aggressive anti-debugging software. If we install the absolute latest version of Wine (e.g., Wine 11.0+), MT5 will detect the translation layer as a "debugger" and immediately crash with the error: *"A debugger has been found running in your system."*
 
 To solve this, we must **force-install Wine 10.0** and "hold" the package so Ubuntu's automatic updater never breaks your setup in the future.
 
@@ -280,6 +280,42 @@ sudo apt-get install -y winehq-stable=10.0.0.0~noble-1 \
 # CRITICAL: Prevent Ubuntu from auto-upgrading Wine in the future
 sudo apt-mark hold winehq-stable wine-stable wine-stable-amd64 wine-stable-i386
 ```
+
+#### Fixing WineHQ Installation Errors on Ubuntu 24.04 (Noble) and beyond
+
+**The Problem:**
+When running the standard WineHQ installation commands on Ubuntu 24.04, `apt update` sometimes fails with `unsupported filetype` and `NO_PUBKEY` errors. This happens because newer versions of Ubuntu enforce stricter repository security, rejecting plain `.key` files in favor of binary `.gpg` formats.
+
+**The Solution:**
+If that happens, we must remove the old `.key` format, convert the WineHQ key into a `.gpg` binary using `gpg --dearmor`, and use a standard `.list` fileas follows:
+
+Replace your existing installation steps with the following block:
+
+```bash
+# 1. Clean up any broken files from previous attempts
+sudo rm -f /etc/apt/keyrings/winehq-archive.key /etc/apt/sources.list.d/winehq-noble.sources
+
+# 2. Download the key and convert it to the required .gpg format
+sudo mkdir -pm 755 /etc/apt/keyrings
+curl -fsSL https://dl.winehq.org/wine-builds/winehq.key | sudo gpg --dearmor -o /etc/apt/keyrings/winehq-archive.gpg
+
+# 3. Add the properly formatted WineHQ repository for Ubuntu 24.04 (Noble)
+echo "deb [signed-by=/etc/apt/keyrings/winehq-archive.gpg] https://dl.winehq.org/wine-builds/ubuntu/ noble main" | sudo tee /etc/apt/sources.list.d/winehq.list
+
+# 4. Update package lists
+sudo apt update
+
+# 5. Install the strictly locked 10.0 version
+sudo apt install -y --install-recommends winehq-stable=10.0.0.0~noble-1 \
+    wine-stable=10.0.0.0~noble-1 \
+    wine-stable-amd64=10.0.0.0~noble-1 \
+    wine-stable-i386=10.0.0.0~noble-1
+
+# 6. CRITICAL: Prevent Ubuntu from auto-upgrading Wine in the future              
+sudo apt-mark hold winehq-stable wine-stable wine-stable-amd64 wine-stable-i386
+```
+
+With this fix, the installation process must flow flawlessly.
 
 ### 2. Initialize the MT5 Prefix
 
