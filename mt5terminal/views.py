@@ -897,7 +897,9 @@ def economic_calendar(request):
     LONG_MIN = "-9223372036854775808"
 
     try:
-        with open(CALENDAR_CSV_PATH, "r", encoding="utf-8") as f:
+        with open(
+            CALENDAR_CSV_PATH, "r", encoding="windows-1252", errors="replace"
+        ) as f:
             reader = csv.DictReader(f)
 
             for row in reader:
