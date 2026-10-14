@@ -615,9 +615,20 @@ def recent_price_action(request):
         )
 
         for ohlc in price_action:
-            ohlc["iso_time"] = datetime.fromtimestamp(
-                ohlc["time"], tz=client.timezone
-            ).isoformat()
+            # 1. Read MT5 timestamp exactly as it was emitted (ignoring OS timezone)
+            naive_dt = datetime.fromtimestamp(ohlc["time"], tz=timezone.utc).replace(
+                tzinfo=None
+            )
+
+            # 2. Tell Python: "This time is actually in Europe/Athens"
+            broker_aware_dt = client.timezone.localize(naive_dt)
+
+            # 3. Convert it safely to actual UTC
+            utc_dt = broker_aware_dt.astimezone(timezone.utc)
+
+            # 4. Overwrite the dictionary with strict UTC values
+            ohlc["time"] = int(utc_dt.timestamp())
+            ohlc["iso_time"] = utc_dt.isoformat()
 
         return Response(
             {
