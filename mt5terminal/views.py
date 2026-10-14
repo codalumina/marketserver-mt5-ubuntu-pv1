@@ -1,6 +1,9 @@
+import csv
 import os
-import shutil
 import platform
+import shutil
+
+import pytz
 
 # --- OS-Agnostic MT5 Import ---
 try:
@@ -11,12 +14,17 @@ except ImportError:
     mt5 = MagicMock()
 # ------------------------------
 
-from rest_framework.response import Response
+from datetime import datetime, timezone
+
+from dotenv import load_dotenv
 from rest_framework import status
 from rest_framework.decorators import api_view
-from datetime import datetime, timezone
+from rest_framework.response import Response
+
 from .connector import MT5DataClient
 from .monitored_symbols import TARGET_SYMBOLS
+
+load_dotenv()
 
 
 @api_view(["GET"])
@@ -842,3 +850,106 @@ def symbols(request):
     finally:
         if client is not None:
             client.shutdown()
+
+
+# ----------------------------------------------------------------------------------------
+# Calendar
+# ----------------------------------------------------------------------------------------
+
+CALENDAR_CSV_PATH = os.getenv(
+    "CALENDAR_CSV_PATH",
+    "/home/serveradmin/.mt5/drive_c/Program Files/MetaTrader 5/MQL5/Files/calendar_export.csv",
+)
+
+
+@api_view(["GET"])
+def economic_calendar(request):
+    """
+    Reads the MT5 calendar export CSV, normalizes timestamps to UTC,
+    and filters by importance/currency.
+    """
+    if not os.path.exists(CALENDAR_CSV_PATH):
+        return Response(
+            {"error": "Calendar data file not found. Ensure MQL5 service is running."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    # Optional Query Parameters for filtering
+    # e.g., /api/calendar/?importance=2,3&currency=USD,EUR,GBP
+    imp_filter = request.query_params.get(
+        "importance", "2,3"
+    )  # Default to Medium (2) and High (3)
+    curr_filter = request.query_params.get(
+        "currency", "USD,EUR,GBP,JPY,AUD,CAD,CHF,NZD"
+    )
+
+    allowed_importance = (
+        [i.strip() for i in imp_filter.split(",")] if imp_filter else []
+    )
+    allowed_currencies = (
+        [c.strip().upper() for c in curr_filter.split(",")] if curr_filter else []
+    )
+
+    events = []
+    broker_tz = pytz.timezone(os.getenv("MT5_TIMEZONE", "Europe/Athens"))
+
+    # MQL5 constant for EMPTY_VALUE / LONG_MIN
+    LONG_MIN = "-9223372036854775808"
+
+    try:
+        with open(CALENDAR_CSV_PATH, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+
+            for row in reader:
+                # 1. Apply Filters
+                if allowed_importance and row["importance"] not in allowed_importance:
+                    continue
+                if allowed_currencies and row["currency"] not in allowed_currencies:
+                    continue
+
+                # 2. Timezone Normalization (Broker Time -> strict UTC)
+                raw_time = int(row["time"])
+                naive_dt = datetime.fromtimestamp(raw_time, tz=timezone.utc).replace(
+                    tzinfo=None
+                )
+                broker_aware_dt = broker_tz.localize(naive_dt)
+                utc_dt = broker_aware_dt.astimezone(timezone.utc)
+
+                # 3. Handle Missing Values & Format Numbers
+                # MT5 multiplies calendar values by 1,000,000 to avoid floats. We divide them back.
+                def parse_val(val_str):
+                    if val_str == LONG_MIN or not val_str:
+                        return None
+                    return float(val_str) / 1000000.0
+
+                events.append(
+                    {
+                        "time": int(utc_dt.timestamp()),
+                        "iso_time": utc_dt.isoformat(),
+                        "event_id": row["event_id"],
+                        "event_name": row["event_name"],
+                        "currency": row["currency"],
+                        "importance": int(row["importance"]),
+                        "actual": parse_val(row["actual_value"]),
+                        "forecast": parse_val(row["forecast_value"]),
+                        "previous": parse_val(row["prev_value"]),
+                    }
+                )
+
+        # Sort chronologically just in case
+        events.sort(key=lambda x: x["time"])
+
+        return Response(
+            {
+                "count": len(events),
+                "events": events,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    except Exception as e:
+        return Response(
+            {"error": f"Failed to parse calendar data: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
