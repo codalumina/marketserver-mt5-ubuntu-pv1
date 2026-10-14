@@ -931,6 +931,7 @@ def economic_calendar(request):
                         "event_id": row["event_id"],
                         "event_name": row["event_name"],
                         "currency": row["currency"],
+                        "country": row.get("country", "N/A"),
                         "importance": int(row["importance"]),
                         "actual": parse_val(row["actual_value"]),
                         "forecast": parse_val(row["forecast_value"]),
